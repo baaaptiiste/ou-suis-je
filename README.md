@@ -1,46 +1,120 @@
-# 📍 Partage de position à la demande
+# 🥾 Suivi de rando
 
-Petite page web : un téléphone envoie sa position GPS, une autre personne la voit sur une carte quand elle veut. Suivre où se trouve quelqu'un (proche, famille, ami…) — pas forcément un couple.
+Partage ta position en direct pendant une randonnée pour que tes proches (parents, famille, amis) voient où tu es, ta trace, et soient alertés en cas de souci.
 
-- `me.html` → page **émetteur** (envoie sa position)
-- `her.html` → page **observateur** (voit la position sur carte)
-- Carte = OpenStreetMap + Leaflet (gratuit, pas de clé API)
-- Position stockée en mémoire du serveur (effacée au redémarrage)
-- Protégé par une clé secrète partagée (`SHARE_SECRET`)
+Deux parties :
 
-## Tester en local
+- **Serveur web** (Node + Express, déployé sur Render) — reçoit ta position et l'affiche sur une carte.
+- **App Android** (Capacitor) — suit ta position **même écran éteint / en arrière-plan** et l'envoie au serveur.
+
+La carte des observateurs s'ouvre dans un simple navigateur, rien à installer pour eux.
+
+---
+
+## Fonctionnalités
+
+- 📍 **Trace en direct** : chemin parcouru dessiné sur la carte (OpenStreetMap + Leaflet, gratuit, pas de clé API).
+- 📊 **Stats** : distance, durée, dénivelé +, vitesse, altitude, batterie, précision GPS.
+- 🔔 **Alertes** côté observateur (bannière + bip) :
+  - 🔴 **Perte de signal** : aucun point reçu depuis 5 min (tél éteint / pas de réseau)
+  - 🟡 **Immobile** : pas bougé (< 60 m) depuis 15 min
+  - 🟢 **Arrivé** : bouton « Je suis arrivé »
+- 🔋 **Économe** : l'app n'envoie qu'au plus **toutes les 30 s** (moins de batterie/données).
+- 🔒 Protégé par une **clé secrète** partagée (`SHARE_SECRET`).
+
+> Position stockée **en mémoire** du serveur (« live only ») : effacée au redémarrage, pas de base de données.
+
+---
+
+## Structure du projet
+
+```
+server.js          serveur Express (API + sert les pages web)
+public/
+  me.html          page émetteur web (envoie la position)
+  her.html         page observateur (carte + trace + stats + alertes)
+  index.html       page d'accueil
+render.yaml        config déploiement Render
+app/               app Android (Capacitor)
+  www/index.html   interface de l'app + suivi background
+  capacitor.config.json
+  android/         projet Android natif généré
+```
+
+### API serveur
+
+| Méthode | Route        | Rôle |
+|---------|--------------|------|
+| POST    | `/start`     | démarre une sortie (efface la trace) |
+| POST    | `/update`    | ajoute un point GPS |
+| POST    | `/stop`      | arrête la sortie |
+| POST    | `/arrived`   | signale l'arrivée |
+| GET     | `/track`     | renvoie toute la trace + méta (pour l'observateur) |
+
+Toutes les routes exigent `?key=SHARE_SECRET`.
+
+---
+
+## Déploiement du serveur (Render, gratuit)
+
+1. Le code est sur GitHub.
+2. Sur https://render.com → **New** → **Blueprint** (lit `render.yaml`) ou **Web Service** :
+   - Build Command : `npm install`
+   - Start Command : `npm start`
+   - Variable d'environnement `SHARE_SECRET` = une clé longue et privée.
+3. Render fournit une URL HTTPS, ex : `https://ou-suis-je.onrender.com`.
+
+**Liens d'usage :**
+- Toi (web, sans l'app) : `https://ou-suis-je.onrender.com/me.html?key=TA_CLE`
+- Observateurs : `https://ou-suis-je.onrender.com/her.html?key=TA_CLE`
+
+> Plan gratuit Render : le serveur s'endort après inactivité → 1er chargement ~30 s.
+
+### Tester le serveur en local
 
 ```bash
 npm install
-SHARE_SECRET=monsecret npm start      # Windows PowerShell: $env:SHARE_SECRET="monsecret"; npm start
+# PowerShell : $env:SHARE_SECRET="monsecret"; npm start
+SHARE_SECRET=monsecret npm start
 ```
 
-- Toi  : http://localhost:3000/me.html?key=monsecret
-- Elle : http://localhost:3000/her.html?key=monsecret
+---
 
-> Le GPS du navigateur marche en `http://localhost`. Sur un vrai téléphone via internet il faut du **HTTPS** (le cloud ci-dessous le donne gratuitement).
+## App Android
 
-## Déployer gratuit (Render)
+L'app suit la position en arrière-plan (service premier-plan + notification) et envoie au serveur.
 
-1. Mets ce dossier sur GitHub (`git init`, commit, push).
-2. Va sur https://render.com → **New** → **Web Service** → choisis ton repo.
-3. Réglages :
-   - Build Command : `npm install`
-   - Start Command : `npm start`
-   - Environment → ajoute variable `SHARE_SECRET` = ta clé secrète (mets un truc long et privé).
-4. Deploy. Render donne une URL HTTPS, ex : `https://ton-app.onrender.com`.
+- `appId` : `com.randotracker.app`
+- Plugins : `@capacitor-community/background-geolocation` (GPS fond), `@capacitor/device` (batterie), `CapacitorHttp` (requêtes natives → contourne le CORS).
 
-Ensuite :
-- Toi  : `https://ton-app.onrender.com/me.html?key=TA_CLE`
-- Elle : `https://ton-app.onrender.com/her.html?key=TA_CLE`
+### Build de l'APK
 
-## Comment ça marche au quotidien
+Pré-requis : Node, JDK 17, Android SDK (platform-tools, `platforms;android-34`, `build-tools;34.0.0`).
 
-- Toi : ouvre la page `me`, appuie **Activer le partage**, autorise la localisation, épingle l'onglet (laisse-le ouvert). Ta position se met à jour seule.
-- Elle : ouvre la page `her` quand elle veut → carte avec ta dernière position, rafraîchie toutes les 10 s.
+```bash
+cd app
+npm install
+npx cap sync android
+cd android
+./gradlew.bat assembleDebug      # Windows ; sinon ./gradlew assembleDebug
+```
 
-## Limites (à savoir)
+APK généré : `app/android/app/build/outputs/apk/debug/app-debug.apk`
 
-- Une page web **ne peut pas** lire le GPS en arrière-plan tout le temps : ta page `me` doit rester ouverte. Si tu fermes tout, sa carte montre la dernière position connue (avec l'heure).
-- Pour un vrai suivi en fond, il faut une app native Android — dis-le moi si tu veux.
-- Plan gratuit Render : le serveur s'endort après inactivité, premier chargement peut prendre ~30 s.
+### Utilisation
+
+1. Installer l'APK (autoriser « apps inconnues »).
+2. Ouvrir **RandoTracker** → saisir l'URL du serveur + la clé.
+3. **Démarrer la rando** → autoriser la localisation **« Toujours »** + les notifications.
+4. Les observateurs ouvrent `/her.html?key=TA_CLE`.
+
+Pour la fiabilité : désactiver l'**optimisation batterie** pour l'app (sinon Android peut la couper en fond).
+
+---
+
+## Limites
+
+- **Sans réseau, rien n'est envoyé** : le GPS capte ta position hors réseau, mais l'envoi au serveur nécessite internet. (Un buffer hors-ligne pourrait être ajouté.)
+- L'APK est en **signature debug** : OK pour usage perso (sideload), pas pour le Play Store.
+- Trace non persistante : perdue au redémarrage du serveur.
+- Batterie lisible sur Chrome Android, **pas sur iPhone/Safari**.
