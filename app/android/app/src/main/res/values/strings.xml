@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">RandoTracker</string>
+    <string name="title_activity_main">RandoTracker</string>
+    <string name="package_name">com.randotracker.app</string>
+    <string name="custom_url_scheme">com.randotracker.app</string>
+</resources>

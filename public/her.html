@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Suivi rando</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; }
+    #bar { padding: 8px 12px; background: #0f1226; color: #eef; font-size: 13px; }
+    #alert { display: none; padding: 10px 12px; font-weight: 700; }
+    #alert.warn { display: block; background: #f5c518; color: #330; }
+    #alert.danger { display: block; background: #ff5d6c; color: #fff; }
+    #alert.ok { display: block; background: #2ec27e; color: #042; }
+    #stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 8px 12px; background: #11142b; color: #eef; }
+    .s b { display: block; font-size: 16px; }
+    .s span { font-size: 11px; opacity: .7; }
+    #map { height: calc(100vh - 132px); width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="bar">Recherche…</div>
+  <div id="alert"></div>
+  <div id="stats">
+    <div class="s"><b id="dist">—</b><span>distance</span></div>
+    <div class="s"><b id="dur">—</b><span>durée</span></div>
+    <div class="s"><b id="gain">—</b><span>dénivelé +</span></div>
+    <div class="s"><b id="spd">—</b><span>vitesse</span></div>
+    <div class="s"><b id="alt">—</b><span>altitude</span></div>
+    <div class="s"><b id="bat">—</b><span>batterie</span></div>
+    <div class="s"><b id="acc">—</b><span>précision</span></div>
+    <div class="s"><b id="age">—</b><span>maj</span></div>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const key = new URLSearchParams(location.search).get("key") || "";
+    const bar = document.getElementById("bar");
+    const alertEl = document.getElementById("alert");
+    const $ = (id) => document.getElementById(id);
+
+    // Seuils alertes
+    const SIGNAL_LOST_MS = 5 * 60 * 1000;   // pas de point depuis 5 min
+    const IDLE_MS = 15 * 60 * 1000;         // immobile depuis 15 min
+    const IDLE_RADIUS_M = 60;               // bouge < 60 m = immobile
+
+    const map = L.map("map").setView([46.6, 2.4], 5);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap", maxZoom: 19,
+    }).addTo(map);
+
+    let line = null, marker = null, accCircle = null, startMark = null, fitted = false, beeped = false;
+
+    function haversine(a, b) {
+      const R = 6371000, toR = (d) => (d * Math.PI) / 180;
+      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    const fmtDur = (ms) => {
+      const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      return h > 0 ? `${h}h${String(m).padStart(2, "0")}` : `${m} min`;
+    };
+    const fmtAge = (ms) => {
+      const s = Math.floor(ms / 1000);
+      return s < 60 ? s + "s" : Math.floor(s / 60) + " min";
+    };
+    function beep() {
+      try {
+        const a = new (window.AudioContext || window.webkitAudioContext)();
+        const o = a.createOscillator(), g = a.createGain();
+        o.connect(g); g.connect(a.destination); o.frequency.value = 880;
+        o.start(); g.gain.setValueAtTime(0.3, a.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.6);
+        o.stop(a.currentTime + 0.6);
+      } catch (e) {}
+    }
+    function setAlert(cls, msg) {
+      alertEl.className = cls; alertEl.textContent = msg;
+      if ((cls === "danger" || cls === "warn") && !beeped) { beep(); beeped = true; }
+      if (cls === "") beeped = false;
+    }
+
+    async function refresh() {
+      let d;
+      try {
+        const r = await fetch("/track?key=" + encodeURIComponent(key));
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        d = await r.json();
+      } catch (e) { bar.textContent = "Erreur: " + e.message; return; }
+
+      const pts = d.points || [];
+      if (pts.length === 0) {
+        bar.textContent = "Pas encore de position. Demande-lui de démarrer la rando.";
+        setAlert("", ""); return;
+      }
+
+      const last = pts[pts.length - 1];
+      const latlngs = pts.map((p) => [p.lat, p.lng]);
+
+      if (!line) line = L.polyline(latlngs, { color: "#2e7dff", weight: 4 }).addTo(map);
+      else line.setLatLngs(latlngs);
+
+      if (!startMark) startMark = L.circleMarker(latlngs[0], { radius: 6, color: "#2ec27e", fillOpacity: 1 }).addTo(map).bindPopup("Départ");
+
+      const pos = [last.lat, last.lng];
+      if (!marker) marker = L.marker(pos).addTo(map);
+      else marker.setLatLng(pos);
+      if (!accCircle) accCircle = L.circle(pos, { radius: last.acc || 0, opacity: .3 }).addTo(map);
+      else accCircle.setLatLng(pos).setRadius(last.acc || 0);
+
+      if (!fitted && pts.length > 1) { map.fitBounds(line.getBounds().pad(0.2)); fitted = true; }
+      else if (!fitted) { map.setView(pos, 15); }
+
+      // Stats
+      let dist = 0, gain = 0;
+      for (let i = 1; i < pts.length; i++) {
+        dist += haversine(pts[i - 1], pts[i]);
+        if (pts[i].alt != null && pts[i - 1].alt != null) {
+          const dz = pts[i].alt - pts[i - 1].alt;
+          if (dz > 0) gain += dz;
+        }
+      }
+      const now = Date.now();
+      const ageMs = now - last.ts;
+      $("dist").textContent = (dist / 1000).toFixed(2) + " km";
+      $("dur").textContent = d.startTs ? fmtDur((d.active ? now : last.ts) - d.startTs) : "—";
+      $("gain").textContent = Math.round(gain) + " m";
+      $("spd").textContent = last.spd != null ? last.spd.toFixed(1) + " km/h" : "—";
+      $("alt").textContent = last.alt != null ? Math.round(last.alt) + " m" : "—";
+      $("bat").textContent = last.bat != null ? last.bat + " %" : "—";
+      $("acc").textContent = last.acc != null ? "±" + Math.round(last.acc) + " m" : "—";
+      $("age").textContent = "il y a " + fmtAge(ageMs);
+
+      bar.textContent = (d.label || "Rando") + (d.active ? " — en cours" : " — arrêtée");
+
+      // Alertes
+      if (d.arrived) { setAlert("ok", "🏁 Arrivé !"); return; }
+
+      if (ageMs > SIGNAL_LOST_MS) {
+        setAlert("danger", "⚠️ Aucun signal depuis " + fmtAge(ageMs) + " (tél éteint / pas de réseau ?)");
+        return;
+      }
+
+      // Immobile : a-t-il bougé > IDLE_RADIUS_M dans les IDLE_MS ?
+      if (d.active) {
+        let movedRecently = false;
+        for (let i = pts.length - 1; i >= 0; i--) {
+          if (now - pts[i].ts > IDLE_MS) break;
+          if (haversine(pts[i], last) > IDLE_RADIUS_M) { movedRecently = true; break; }
+        }
+        const oldest = pts[0].ts;
+        const hasWindow = now - oldest >= IDLE_MS;
+        if (hasWindow && !movedRecently) {
+          setAlert("warn", "⏸️ Immobile depuis ~" + fmtDur(IDLE_MS));
+          return;
+        }
+      }
+      setAlert("", "");
+    }
+
+    if (!key) bar.textContent = "Manque ?key=... dans l'URL.";
+    else { refresh(); setInterval(refresh, 10000); }
+  </script>
+</body>
+</html>

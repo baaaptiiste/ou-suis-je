@@ -1,0 +1,20 @@
+{
+  "name": "rando-tracker-app",
+  "version": "1.0.0",
+  "description": "App Android de suivi rando (Capacitor + background geolocation)",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync",
+    "open": "cap open android",
+    "apk": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/device": "^6.0.1",
+    "@capacitor-community/background-geolocation": "^1.2.20"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

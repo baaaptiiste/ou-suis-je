@@ -1,0 +1,16 @@
+{
+  "name": "ou-suis-je",
+  "version": "1.0.0",
+  "description": "Partage de geolocalisation a la demande",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

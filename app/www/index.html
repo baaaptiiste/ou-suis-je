@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>RandoTracker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 22px; background: #0f1226; color: #eef; }
+    .box { background: #1a1e3a; padding: 18px; border-radius: 16px; max-width: 480px; margin: 0 auto; }
+    h1 { font-size: 20px; margin-top: 0; }
+    label { font-size: 13px; opacity: .8; }
+    input { width: 100%; box-sizing: border-box; padding: 11px; margin: 6px 0 14px; border-radius: 10px; border: 1px solid #333a66; background: #11142b; color: #eef; font-size: 15px; }
+    button { font-size: 17px; padding: 14px; border: 0; border-radius: 12px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: 700; }
+    .start { background: #2ec27e; color: #042; }
+    .stop { background: #ff5d6c; color: #400; }
+    .arr { background: #f5c518; color: #330; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    .stat { background: #11142b; padding: 10px; border-radius: 10px; }
+    .stat b { display: block; font-size: 18px; }
+    .stat span { font-size: 12px; opacity: .7; }
+    #log { margin-top: 14px; font-size: 13px; opacity: .85; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>🥾 RandoTracker</h1>
+    <label>Serveur</label>
+    <input id="base" placeholder="https://ou-suis-je.onrender.com" />
+    <label>Clé secrète</label>
+    <input id="key" placeholder="ta clé SHARE_SECRET" />
+
+    <button id="toggle" class="start">▶ Démarrer la rando</button>
+    <button id="arrived" class="arr" style="display:none">🏁 Je suis arrivé</button>
+
+    <div class="stats">
+      <div class="stat"><b id="dist">—</b><span>distance</span></div>
+      <div class="stat"><b id="spd">—</b><span>vitesse</span></div>
+      <div class="stat"><b id="alt">—</b><span>altitude</span></div>
+      <div class="stat"><b id="bat">—</b><span>batterie</span></div>
+    </div>
+    <div id="log">Prêt. Le suivi continue écran éteint.</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = (m) => { $("log").textContent = m; try { console.log("[app] " + m); } catch (e) {} };
+
+    // Gardes d'erreur en premier (sinon erreur de chargement = invisible)
+    window.onerror = (m) => log("JS error: " + m);
+    window.onunhandledrejection = (e) => log("Rejet: " + ((e.reason && e.reason.message) ? e.reason.message : e.reason));
+
+    // Accès plugins robuste (registerPlugin absent sans bundler -> fallback Capacitor.Plugins)
+    const reg = (Capacitor && typeof Capacitor.registerPlugin === "function")
+      ? (n) => Capacitor.registerPlugin(n)
+      : (n) => ((Capacitor && Capacitor.Plugins) || {})[n];
+    const BG = reg("BackgroundGeolocation");
+    const Device = reg("Device");
+    if (!BG || !BG.addWatcher) log("⚠️ Plugin GPS introuvable (BG)");
+
+    // Persiste serveur + clé
+    $("base").value = localStorage.getItem("base") || "https://ou-suis-je.onrender.com";
+    $("key").value = localStorage.getItem("key") || "";
+    $("base").oninput = () => localStorage.setItem("base", $("base").value.trim());
+    $("key").oninput = () => localStorage.setItem("key", $("key").value.trim());
+
+    let watcherId = null, active = false, lastPt = null, distM = 0, lastSendTs = 0;
+    const MIN_SEND_MS = 30000; // envoi au plus toutes les 30 s
+
+    function haversine(a, b) {
+      const R = 6371000, toR = (d) => (d * Math.PI) / 180;
+      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    const url = (p) => $("base").value.trim() + p + "?key=" + encodeURIComponent($("key").value.trim());
+    async function post(p, body) {
+      try {
+        const r = await fetch(url(p), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return true;
+      } catch (e) { log("Erreur réseau: " + e.message); return false; }
+    }
+
+    async function battery() {
+      try { const i = await Device.getBatteryInfo(); return i.batteryLevel != null ? Math.round(i.batteryLevel * 100) : null; }
+      catch { return null; }
+    }
+
+    async function onLoc(loc) {
+      const pt = { lat: loc.latitude, lng: loc.longitude };
+      if (lastPt) distM += haversine(lastPt, pt);
+      lastPt = pt;
+      const spdKmh = loc.speed != null && loc.speed >= 0 ? loc.speed * 3.6 : null;
+      $("dist").textContent = (distM / 1000).toFixed(2) + " km";
+      $("spd").textContent = spdKmh != null ? spdKmh.toFixed(1) + " km/h" : "—";
+      $("alt").textContent = loc.altitude != null ? Math.round(loc.altitude) + " m" : "—";
+
+      // Throttle: au plus un envoi toutes les 30 s
+      const now = Date.now();
+      if (now - lastSendTs < MIN_SEND_MS) return;
+      lastSendTs = now;
+
+      const bat = await battery();
+      $("bat").textContent = bat != null ? bat + " %" : "—";
+      const ok = await post("/update", { lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy, alt: loc.altitude, spd: spdKmh, bat });
+      if (ok) log("Envoyé " + new Date().toLocaleTimeString());
+    }
+
+    async function start() {
+      if (!$("key").value.trim()) { log("Renseigne la clé d'abord."); return; }
+      await post("/start", { label: "Rando " + new Date().toLocaleDateString() });
+      lastPt = null; distM = 0; lastSendTs = 0;
+      watcherId = await BG.addWatcher(
+        {
+          backgroundMessage: "Suivi rando actif — position partagée",
+          backgroundTitle: "RandoTracker",
+          requestPermissions: true,
+          stale: false,
+          distanceFilter: 10,
+        },
+        (location, error) => {
+          if (error) {
+            if (error.code === "NOT_AUTHORIZED") log("Localisation refusée. Active-la dans les réglages.");
+            else log("Erreur GPS: " + error.message);
+            return;
+          }
+          onLoc(location);
+        }
+      );
+      active = true;
+      $("toggle").textContent = "⏹ Arrêter"; $("toggle").className = "stop";
+      $("arrived").style.display = "block";
+      log("Rando active. Suivi même écran éteint.");
+    }
+
+    async function stop() {
+      if (watcherId) await BG.removeWatcher({ id: watcherId });
+      watcherId = null; active = false;
+      await post("/stop");
+      $("toggle").textContent = "▶ Démarrer la rando"; $("toggle").className = "start";
+      $("arrived").style.display = "none";
+      log("Rando arrêtée.");
+    }
+
+    $("toggle").onclick = async () => {
+      try {
+        log(active ? "Arrêt..." : "Démarrage...");
+        if (active) await stop(); else await start();
+      } catch (e) {
+        log("Erreur: " + (e && e.message ? e.message : JSON.stringify(e)));
+      }
+    };
+    $("arrived").onclick = async () => { if (await post("/arrived")) log("Arrivée signalée 🏁"); };
+  </script>
+</body>
+</html>

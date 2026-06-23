@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ma rando — partage</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #0f1226; color: #eef; }
+    .box { background: #1a1e3a; padding: 18px; border-radius: 16px; max-width: 440px; margin: 0 auto; }
+    h1 { font-size: 19px; margin-top: 0; }
+    button { font-size: 17px; padding: 13px 18px; border: 0; border-radius: 12px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: 600; }
+    .start { background: #2ec27e; color: #042; }
+    .stop { background: #ff5d6c; color: #400; }
+    .arr { background: #f5c518; color: #330; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    .stat { background: #11142b; padding: 10px; border-radius: 10px; }
+    .stat b { display: block; font-size: 18px; }
+    .stat span { font-size: 12px; opacity: .7; }
+    #log { margin-top: 14px; font-size: 13px; opacity: .8; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>🥾 Ma rando</h1>
+    <p style="font-size:14px;opacity:.85">Démarre, autorise la localisation, garde l'écran allumé (épingle l'onglet). Tes parents suivent en direct.</p>
+    <button id="toggle" class="start">▶ Démarrer la rando</button>
+    <button id="arrived" class="arr" style="display:none">🏁 Je suis arrivé</button>
+
+    <div class="stats">
+      <div class="stat"><b id="dist">—</b><span>distance</span></div>
+      <div class="stat"><b id="dur">—</b><span>durée</span></div>
+      <div class="stat"><b id="spd">—</b><span>vitesse</span></div>
+      <div class="stat"><b id="alt">—</b><span>altitude</span></div>
+      <div class="stat"><b id="bat">—</b><span>batterie</span></div>
+      <div class="stat"><b id="acc">—</b><span>précision GPS</span></div>
+    </div>
+    <div id="log">Inactif.</div>
+  </div>
+
+  <script>
+    const key = new URLSearchParams(location.search).get("key") || "";
+    const tBtn = document.getElementById("toggle");
+    const aBtn = document.getElementById("arrived");
+    const log = document.getElementById("log");
+    const $ = (id) => document.getElementById(id);
+
+    let watchId = null, battery = null, active = false;
+    let startTs = null, lastPt = null, distM = 0, durTimer = null;
+
+    // Batterie (Chrome Android). Absent iOS -> reste null.
+    if (navigator.getBattery) {
+      navigator.getBattery().then((b) => {
+        const upd = () => (battery = Math.round(b.level * 100));
+        upd(); b.addEventListener("levelchange", upd);
+      });
+    }
+
+    function haversine(a, b) {
+      const R = 6371000, toR = (d) => (d * Math.PI) / 180;
+      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    const fmtDur = (ms) => {
+      const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      return h > 0 ? `${h}h${String(m).padStart(2, "0")}` : `${m} min`;
+    };
+
+    async function post(url, body) {
+      return fetch(url + "?key=" + encodeURIComponent(key), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+    }
+
+    async function onPos(pos) {
+      const c = pos.coords;
+      const pt = { lat: c.latitude, lng: c.longitude };
+      if (lastPt) distM += haversine(lastPt, pt);
+      lastPt = pt;
+
+      const spdKmh = c.speed != null && c.speed >= 0 ? c.speed * 3.6 : null;
+      $("dist").textContent = (distM / 1000).toFixed(2) + " km";
+      $("spd").textContent = spdKmh != null ? spdKmh.toFixed(1) + " km/h" : "—";
+      $("alt").textContent = c.altitude != null ? Math.round(c.altitude) + " m" : "—";
+      $("bat").textContent = battery != null ? battery + " %" : "—";
+      $("acc").textContent = c.accuracy != null ? "±" + Math.round(c.accuracy) + " m" : "—";
+
+      try {
+        const r = await post("/update", {
+          lat: c.latitude, lng: c.longitude, acc: c.accuracy,
+          alt: c.altitude, spd: spdKmh, bat: battery,
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        log.textContent = "Envoyé " + new Date().toLocaleTimeString();
+      } catch (e) { log.textContent = "Erreur envoi: " + e.message; }
+    }
+
+    async function start() {
+      if (!navigator.geolocation) { log.textContent = "GPS non supporté."; return; }
+      await post("/start", { label: "Rando " + new Date().toLocaleDateString() });
+      active = true; startTs = Date.now(); lastPt = null; distM = 0;
+      watchId = navigator.geolocation.watchPosition(onPos,
+        (e) => (log.textContent = "Erreur GPS: " + e.message),
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+      durTimer = setInterval(() => { $("dur").textContent = fmtDur(Date.now() - startTs); }, 1000);
+      tBtn.textContent = "⏹ Arrêter"; tBtn.className = "stop";
+      aBtn.style.display = "block";
+      log.textContent = "Rando active...";
+    }
+
+    async function stop() {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      clearInterval(durTimer);
+      watchId = null; active = false;
+      await post("/stop");
+      tBtn.textContent = "▶ Démarrer la rando"; tBtn.className = "start";
+      aBtn.style.display = "none";
+      log.textContent = "Rando arrêtée.";
+    }
+
+    tBtn.onclick = () => (active ? stop() : start());
+    aBtn.onclick = async () => { await post("/arrived"); log.textContent = "Arrivée signalée 🏁"; };
+    if (!key) log.textContent = "Manque ?key=... dans l'URL.";
+  </script>
+</body>
+</html>

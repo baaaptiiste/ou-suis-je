@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ou-suis-je
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SHARE_SECRET
+        sync: false

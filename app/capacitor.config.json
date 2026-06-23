@@ -1,0 +1,13 @@
+{
+  "appId": "com.randotracker.app",
+  "appName": "RandoTracker",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
