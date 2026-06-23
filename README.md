@@ -105,8 +105,11 @@ APK généré : `app/android/app/build/outputs/apk/debug/app-debug.apk`
 
 1. Installer l'APK (autoriser « apps inconnues »).
 2. Ouvrir **RandoTracker** → saisir l'URL du serveur + la clé.
-3. **Démarrer la rando** → autoriser la localisation **« Toujours »** + les notifications.
-4. Les observateurs ouvrent `/her.html?key=TA_CLE`.
+3. Choisir le mode :
+   - **🥾 Je randonne** → **Démarrer la rando** → autoriser la localisation **« Toujours »** + notifications. Suit en arrière-plan.
+   - **👁️ Je suis une rando** → carte + trace + stats + alertes, directement dans l'app (pas besoin de navigateur).
+
+Les observateurs peuvent aussi utiliser la page web `/her.html?key=TA_CLE` s'ils préfèrent.
 
 Pour la fiabilité : désactiver l'**optimisation batterie** pour l'app (sinon Android peut la couper en fond).
 

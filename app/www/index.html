@@ -4,76 +4,121 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>RandoTracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root { color-scheme: dark; }
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 22px; background: #0f1226; color: #eef; }
-    .box { background: #1a1e3a; padding: 18px; border-radius: 16px; max-width: 480px; margin: 0 auto; }
-    h1 { font-size: 20px; margin-top: 0; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #0f1226; color: #eef; }
+    .screen { display: none; }
+    .screen.on { display: block; }
+    .pad { padding: 20px; max-width: 520px; margin: 0 auto; }
+    h1 { font-size: 21px; margin: 0 0 14px; }
     label { font-size: 13px; opacity: .8; }
-    input { width: 100%; box-sizing: border-box; padding: 11px; margin: 6px 0 14px; border-radius: 10px; border: 1px solid #333a66; background: #11142b; color: #eef; font-size: 15px; }
+    input { width: 100%; padding: 11px; margin: 6px 0 14px; border-radius: 10px; border: 1px solid #333a66; background: #11142b; color: #eef; font-size: 15px; }
     button { font-size: 17px; padding: 14px; border: 0; border-radius: 12px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: 700; }
+    .big { padding: 22px; font-size: 19px; }
+    .blue { background: #2e7dff; color: #fff; }
+    .green { background: #2ec27e; color: #042; }
     .start { background: #2ec27e; color: #042; }
     .stop { background: #ff5d6c; color: #400; }
     .arr { background: #f5c518; color: #330; }
+    .ghost { background: #1a1e3a; color: #9fb; }
+    .back { background: none; color: #8ab; width: auto; padding: 8px 0; margin: 0; font-size: 14px; font-weight: 600; text-align: left; }
     .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
     .stat { background: #11142b; padding: 10px; border-radius: 10px; }
     .stat b { display: block; font-size: 18px; }
     .stat span { font-size: 12px; opacity: .7; }
     #log { margin-top: 14px; font-size: 13px; opacity: .85; min-height: 20px; }
+
+    /* Receveur plein ecran */
+    #receiver.on { display: flex; flex-direction: column; height: 100vh; }
+    #recHead { padding: 8px 12px; }
+    #bar { font-size: 13px; opacity: .9; margin-top: 4px; }
+    #alert { display: none; padding: 9px 12px; font-weight: 700; }
+    #alert.warn { display: block; background: #f5c518; color: #330; }
+    #alert.danger { display: block; background: #ff5d6c; color: #fff; }
+    #alert.ok { display: block; background: #2ec27e; color: #042; }
+    #recStats { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 6px 10px; background: #11142b; }
+    #recStats .stat { padding: 7px; }
+    #recStats b { font-size: 15px; }
+    #recStats span { font-size: 10px; }
+    #map { flex: 1; width: 100%; }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h1>🥾 RandoTracker</h1>
-    <label>Serveur</label>
-    <input id="base" placeholder="https://ou-suis-je.onrender.com" />
-    <label>Clé secrète</label>
-    <input id="key" placeholder="ta clé SHARE_SECRET" />
 
-    <button id="toggle" class="start">▶ Démarrer la rando</button>
-    <button id="arrived" class="arr" style="display:none">🏁 Je suis arrivé</button>
-
-    <div class="stats">
-      <div class="stat"><b id="dist">—</b><span>distance</span></div>
-      <div class="stat"><b id="spd">—</b><span>vitesse</span></div>
-      <div class="stat"><b id="alt">—</b><span>altitude</span></div>
-      <div class="stat"><b id="bat">—</b><span>batterie</span></div>
+  <!-- ACCUEIL -->
+  <section id="home" class="screen on">
+    <div class="pad">
+      <h1>🥾 RandoTracker</h1>
+      <label>Serveur</label>
+      <input id="base" placeholder="https://ou-suis-je.onrender.com" />
+      <label>Clé secrète</label>
+      <input id="key" placeholder="clé partagée" />
+      <button class="big green" id="goHiker">🥾 Je randonne</button>
+      <button class="big blue" id="goReceiver">👁️ Je suis une rando</button>
+      <p style="font-size:12px;opacity:.6;margin-top:18px">Randonneur : partage ta position (même écran éteint). Receveur : suis quelqu'un sur la carte.</p>
     </div>
-    <div id="log">Prêt. Le suivi continue écran éteint.</div>
-  </div>
+  </section>
 
+  <!-- RANDONNEUR -->
+  <section id="hiker" class="screen">
+    <div class="pad">
+      <button class="back" data-home>← Accueil</button>
+      <h1>🥾 Ma rando</h1>
+      <button id="toggle" class="start">▶ Démarrer la rando</button>
+      <button id="arrived" class="arr" style="display:none">🏁 Je suis arrivé</button>
+      <div class="stats">
+        <div class="stat"><b id="h_dist">—</b><span>distance</span></div>
+        <div class="stat"><b id="h_spd">—</b><span>vitesse</span></div>
+        <div class="stat"><b id="h_alt">—</b><span>altitude</span></div>
+        <div class="stat"><b id="h_bat">—</b><span>batterie</span></div>
+      </div>
+      <div id="log">Prêt. Le suivi continue écran éteint.</div>
+    </div>
+  </section>
+
+  <!-- RECEVEUR -->
+  <section id="receiver" class="screen">
+    <div id="recHead">
+      <button class="back" data-home>← Accueil</button>
+      <div id="bar">Recherche…</div>
+    </div>
+    <div id="alert"></div>
+    <div id="recStats">
+      <div class="stat"><b id="r_dist">—</b><span>distance</span></div>
+      <div class="stat"><b id="r_dur">—</b><span>durée</span></div>
+      <div class="stat"><b id="r_gain">—</b><span>déniv +</span></div>
+      <div class="stat"><b id="r_spd">—</b><span>vitesse</span></div>
+      <div class="stat"><b id="r_alt">—</b><span>altitude</span></div>
+      <div class="stat"><b id="r_bat">—</b><span>batterie</span></div>
+      <div class="stat"><b id="r_acc">—</b><span>précision</span></div>
+      <div class="stat"><b id="r_age">—</b><span>maj</span></div>
+    </div>
+    <div id="map"></div>
+  </section>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const log = (m) => { $("log").textContent = m; try { console.log("[app] " + m); } catch (e) {} };
-
-    // Gardes d'erreur en premier (sinon erreur de chargement = invisible)
     window.onerror = (m) => log("JS error: " + m);
     window.onunhandledrejection = (e) => log("Rejet: " + ((e.reason && e.reason.message) ? e.reason.message : e.reason));
 
-    // Accès plugins robuste (registerPlugin absent sans bundler -> fallback Capacitor.Plugins)
-    const reg = (Capacitor && typeof Capacitor.registerPlugin === "function")
+    // Plugins (registerPlugin absent sans bundler -> fallback Capacitor.Plugins)
+    const reg = (typeof Capacitor !== "undefined" && typeof Capacitor.registerPlugin === "function")
       ? (n) => Capacitor.registerPlugin(n)
-      : (n) => ((Capacitor && Capacitor.Plugins) || {})[n];
+      : (n) => ((typeof Capacitor !== "undefined" && Capacitor.Plugins) || {})[n];
     const BG = reg("BackgroundGeolocation");
     const Device = reg("Device");
-    if (!BG || !BG.addWatcher) log("⚠️ Plugin GPS introuvable (BG)");
 
-    // Persiste serveur + clé
+    // ---- Config partagee ----
     $("base").value = localStorage.getItem("base") || "https://ou-suis-je.onrender.com";
     $("key").value = localStorage.getItem("key") || "";
     $("base").oninput = () => localStorage.setItem("base", $("base").value.trim());
     $("key").oninput = () => localStorage.setItem("key", $("key").value.trim());
-
-    let watcherId = null, active = false, lastPt = null, distM = 0, lastSendTs = 0;
-    const MIN_SEND_MS = 30000; // envoi au plus toutes les 30 s
-
-    function haversine(a, b) {
-      const R = 6371000, toR = (d) => (d * Math.PI) / 180;
-      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
-      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
-      return 2 * R * Math.asin(Math.sqrt(s));
-    }
     const url = (p) => $("base").value.trim() + p + "?key=" + encodeURIComponent($("key").value.trim());
+
     async function post(p, body) {
       try {
         const r = await fetch(url(p), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -82,49 +127,57 @@
       } catch (e) { log("Erreur réseau: " + e.message); return false; }
     }
 
+    // ---- Helpers communs ----
+    function haversine(a, b) {
+      const R = 6371000, toR = (d) => (d * Math.PI) / 180;
+      const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    const fmtDur = (ms) => { const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h${String(m).padStart(2, "0")}` : `${m} min`; };
+    const fmtAge = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? s + "s" : Math.floor(s / 60) + " min"; };
+
+    // ---- Navigation entre ecrans ----
+    function show(id) {
+      ["home", "hiker", "receiver"].forEach((s) => $(s).classList.toggle("on", s === id));
+      if (id === "receiver") startReceiver(); else stopReceiver();
+    }
+    document.querySelectorAll("[data-home]").forEach((b) => (b.onclick = () => show("home")));
+    $("goHiker").onclick = () => { if (!$("key").value.trim()) { alert("Renseigne la clé d'abord."); return; } show("hiker"); };
+    $("goReceiver").onclick = () => { if (!$("key").value.trim()) { alert("Renseigne la clé d'abord."); return; } show("receiver"); };
+
+    /* =================== RANDONNEUR =================== */
+    let watcherId = null, active = false, lastPt = null, distM = 0, lastSendTs = 0;
+    const MIN_SEND_MS = 30000;
+
     async function battery() {
       try { const i = await Device.getBatteryInfo(); return i.batteryLevel != null ? Math.round(i.batteryLevel * 100) : null; }
       catch { return null; }
     }
-
     async function onLoc(loc) {
       const pt = { lat: loc.latitude, lng: loc.longitude };
       if (lastPt) distM += haversine(lastPt, pt);
       lastPt = pt;
       const spdKmh = loc.speed != null && loc.speed >= 0 ? loc.speed * 3.6 : null;
-      $("dist").textContent = (distM / 1000).toFixed(2) + " km";
-      $("spd").textContent = spdKmh != null ? spdKmh.toFixed(1) + " km/h" : "—";
-      $("alt").textContent = loc.altitude != null ? Math.round(loc.altitude) + " m" : "—";
-
-      // Throttle: au plus un envoi toutes les 30 s
+      $("h_dist").textContent = (distM / 1000).toFixed(2) + " km";
+      $("h_spd").textContent = spdKmh != null ? spdKmh.toFixed(1) + " km/h" : "—";
+      $("h_alt").textContent = loc.altitude != null ? Math.round(loc.altitude) + " m" : "—";
       const now = Date.now();
       if (now - lastSendTs < MIN_SEND_MS) return;
       lastSendTs = now;
-
       const bat = await battery();
-      $("bat").textContent = bat != null ? bat + " %" : "—";
+      $("h_bat").textContent = bat != null ? bat + " %" : "—";
       const ok = await post("/update", { lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy, alt: loc.altitude, spd: spdKmh, bat });
       if (ok) log("Envoyé " + new Date().toLocaleTimeString());
     }
-
-    async function start() {
-      if (!$("key").value.trim()) { log("Renseigne la clé d'abord."); return; }
+    async function hikerStart() {
+      if (!BG || !BG.addWatcher) { log("⚠️ Plugin GPS introuvable"); return; }
       await post("/start", { label: "Rando " + new Date().toLocaleDateString() });
       lastPt = null; distM = 0; lastSendTs = 0;
       watcherId = await BG.addWatcher(
-        {
-          backgroundMessage: "Suivi rando actif — position partagée",
-          backgroundTitle: "RandoTracker",
-          requestPermissions: true,
-          stale: false,
-          distanceFilter: 10,
-        },
+        { backgroundMessage: "Suivi rando actif — position partagée", backgroundTitle: "RandoTracker", requestPermissions: true, stale: false, distanceFilter: 10 },
         (location, error) => {
-          if (error) {
-            if (error.code === "NOT_AUTHORIZED") log("Localisation refusée. Active-la dans les réglages.");
-            else log("Erreur GPS: " + error.message);
-            return;
-          }
+          if (error) { log(error.code === "NOT_AUTHORIZED" ? "Localisation refusée. Active-la dans les réglages." : "Erreur GPS: " + error.message); return; }
           onLoc(location);
         }
       );
@@ -133,8 +186,7 @@
       $("arrived").style.display = "block";
       log("Rando active. Suivi même écran éteint.");
     }
-
-    async function stop() {
+    async function hikerStop() {
       if (watcherId) await BG.removeWatcher({ id: watcherId });
       watcherId = null; active = false;
       await post("/stop");
@@ -142,16 +194,91 @@
       $("arrived").style.display = "none";
       log("Rando arrêtée.");
     }
-
     $("toggle").onclick = async () => {
-      try {
-        log(active ? "Arrêt..." : "Démarrage...");
-        if (active) await stop(); else await start();
-      } catch (e) {
-        log("Erreur: " + (e && e.message ? e.message : JSON.stringify(e)));
-      }
+      try { log(active ? "Arrêt..." : "Démarrage..."); if (active) await hikerStop(); else await hikerStart(); }
+      catch (e) { log("Erreur: " + (e && e.message ? e.message : JSON.stringify(e))); }
     };
     $("arrived").onclick = async () => { if (await post("/arrived")) log("Arrivée signalée 🏁"); };
+
+    /* =================== RECEVEUR =================== */
+    const SIGNAL_LOST_MS = 5 * 60 * 1000, IDLE_MS = 15 * 60 * 1000, IDLE_RADIUS_M = 60;
+    let map = null, line = null, marker = null, accCircle = null, startMark = null, fitted = false, beeped = false, recTimer = null;
+
+    function beep() {
+      try {
+        const a = new (window.AudioContext || window.webkitAudioContext)();
+        const o = a.createOscillator(), g = a.createGain();
+        o.connect(g); g.connect(a.destination); o.frequency.value = 880;
+        o.start(); g.gain.setValueAtTime(0.3, a.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.6); o.stop(a.currentTime + 0.6);
+      } catch (e) {}
+    }
+    function setAlert(cls, msg) {
+      $("alert").className = cls; $("alert").textContent = msg;
+      if ((cls === "danger" || cls === "warn") && !beeped) { beep(); beeped = true; }
+      if (cls === "") beeped = false;
+    }
+    function ensureMap() {
+      if (map) { setTimeout(() => map.invalidateSize(), 100); return; }
+      map = L.map("map").setView([46.6, 2.4], 5);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19 }).addTo(map);
+      setTimeout(() => map.invalidateSize(), 200);
+    }
+    function startReceiver() {
+      fitted = false; beeped = false;
+      ensureMap();
+      recRefresh();
+      recTimer = setInterval(recRefresh, 10000);
+    }
+    function stopReceiver() {
+      if (recTimer) clearInterval(recTimer);
+      recTimer = null;
+    }
+    async function recRefresh() {
+      let d;
+      try {
+        const r = await fetch(url("/track"));
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        d = await r.json();
+      } catch (e) { $("bar").textContent = "Erreur: " + e.message; return; }
+
+      const pts = d.points || [];
+      if (pts.length === 0) { $("bar").textContent = "Pas encore de position. Demande de démarrer la rando."; setAlert("", ""); return; }
+
+      const last = pts[pts.length - 1];
+      const latlngs = pts.map((p) => [p.lat, p.lng]);
+      if (!line) line = L.polyline(latlngs, { color: "#2e7dff", weight: 4 }).addTo(map); else line.setLatLngs(latlngs);
+      if (!startMark) startMark = L.circleMarker(latlngs[0], { radius: 6, color: "#2ec27e", fillOpacity: 1 }).addTo(map).bindPopup("Départ");
+      const pos = [last.lat, last.lng];
+      if (!marker) marker = L.marker(pos).addTo(map); else marker.setLatLng(pos);
+      if (!accCircle) accCircle = L.circle(pos, { radius: last.acc || 0, opacity: .3 }).addTo(map); else accCircle.setLatLng(pos).setRadius(last.acc || 0);
+      if (!fitted && pts.length > 1) { map.fitBounds(line.getBounds().pad(0.2)); fitted = true; } else if (!fitted) { map.setView(pos, 15); fitted = true; }
+
+      let dist = 0, gain = 0;
+      for (let i = 1; i < pts.length; i++) {
+        dist += haversine(pts[i - 1], pts[i]);
+        if (pts[i].alt != null && pts[i - 1].alt != null) { const dz = pts[i].alt - pts[i - 1].alt; if (dz > 0) gain += dz; }
+      }
+      const now = Date.now(), ageMs = now - last.ts;
+      $("r_dist").textContent = (dist / 1000).toFixed(2) + " km";
+      $("r_dur").textContent = d.startTs ? fmtDur((d.active ? now : last.ts) - d.startTs) : "—";
+      $("r_gain").textContent = Math.round(gain) + " m";
+      $("r_spd").textContent = last.spd != null ? last.spd.toFixed(1) + " km/h" : "—";
+      $("r_alt").textContent = last.alt != null ? Math.round(last.alt) + " m" : "—";
+      $("r_bat").textContent = last.bat != null ? last.bat + " %" : "—";
+      $("r_acc").textContent = last.acc != null ? "±" + Math.round(last.acc) + " m" : "—";
+      $("r_age").textContent = "il y a " + fmtAge(ageMs);
+      $("bar").textContent = (d.label || "Rando") + (d.active ? " — en cours" : " — arrêtée");
+
+      if (d.arrived) { setAlert("ok", "🏁 Arrivé !"); return; }
+      if (ageMs > SIGNAL_LOST_MS) { setAlert("danger", "⚠️ Aucun signal depuis " + fmtAge(ageMs)); return; }
+      if (d.active) {
+        let moved = false;
+        for (let i = pts.length - 1; i >= 0; i--) { if (now - pts[i].ts > IDLE_MS) break; if (haversine(pts[i], last) > IDLE_RADIUS_M) { moved = true; break; } }
+        if (now - pts[0].ts >= IDLE_MS && !moved) { setAlert("warn", "⏸️ Immobile depuis ~" + fmtDur(IDLE_MS)); return; }
+      }
+      setAlert("", "");
+    }
   </script>
 </body>
 </html>
