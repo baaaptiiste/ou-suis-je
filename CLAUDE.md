@@ -63,7 +63,7 @@ adb install -r -g RandoTracker.apk
 2. **CORS** : les fetch de l'app (origine `https://localhost`) vers Render étaient bloqués → activé **CapacitorHttp** (`plugins.CapacitorHttp.enabled=true`) = requêtes HTTP natives, plus de CORS.
 3. **Permissions Android** : après `cap add android`, ré-ajouter manuellement dans `AndroidManifest.xml` : ACCESS_FINE/COARSE/BACKGROUND_LOCATION, FOREGROUND_SERVICE(+LOCATION), POST_NOTIFICATIONS, WAKE_LOCK. Et recréer `android/local.properties` (`sdk.dir=...`).
 4. **Envoi position** : throttlé à 30 s max (`MIN_SEND_MS`) ; le GPS suit par distance (`distanceFilter: 10`).
-5. **Sans réseau** : le GPS capte mais l'envoi est impossible (pas de buffer hors-ligne implémenté).
+5. **Sans réseau** : le GPS capte ; les points sont bufferisés (`queue` en localStorage, plafond 5000) et renvoyés en lot via `POST /batch` au retour réseau. Pas de transmission satellite (impossible sur tél standard).
 6. **Batterie** : lisible Chrome Android, pas iOS.
 
 ## Toolchain (pour rebuild sur une nouvelle machine Windows)
@@ -74,5 +74,5 @@ adb install -r -g RandoTracker.apk
 
 ## Etat actuel / idées suivantes
 
-- Fait : web + Render + app 2 modes + releases APK.
-- Idées non faites : buffer hors-ligne (envoi différé au retour réseau), historique des sorties (DB), multi-randonneurs, APK signé release (Play Store), reconnexion Render après recréation du repo.
+- Fait : web + Render + app 2 modes + releases APK + buffer hors-ligne (`/batch`) + nom randonneur + carte sombre/clair + recentrer.
+- Idées non faites : historique des sorties (DB), multi-randonneurs, APK signé release (Play Store), SOS, destination+ETA, export GPX, reconnexion Render après recréation du repo.

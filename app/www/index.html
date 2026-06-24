@@ -43,6 +43,8 @@
     #recStats b { font-size: 15px; }
     #recStats span { font-size: 10px; }
     #map { flex: 1; width: 100%; }
+    #mapctrl { display: flex; gap: 8px; margin-top: 6px; }
+    .mapbtn { width: auto; margin: 0; padding: 7px 12px; font-size: 13px; background: #1a1e3a; color: #cde; }
   </style>
 </head>
 <body>
@@ -55,6 +57,8 @@
       <input id="base" placeholder="https://ou-suis-je.onrender.com" />
       <label>Clé secrète</label>
       <input id="key" placeholder="clé partagée" />
+      <label>Ton nom (randonneur)</label>
+      <input id="hname" placeholder="ex: Baptiste" />
       <button class="big green" id="goHiker">🥾 Je randonne</button>
       <button class="big blue" id="goReceiver">👁️ Je suis une rando</button>
       <p style="font-size:12px;opacity:.6;margin-top:18px">Randonneur : partage ta position (même écran éteint). Receveur : suis quelqu'un sur la carte.</p>
@@ -83,6 +87,10 @@
     <div id="recHead">
       <button class="back" data-home>← Accueil</button>
       <div id="bar">Recherche…</div>
+      <div id="mapctrl">
+        <button id="recenter" class="mapbtn">🎯 Recentrer</button>
+        <button id="themeToggle" class="mapbtn">🌙 Sombre</button>
+      </div>
     </div>
     <div id="alert"></div>
     <div id="recStats">
@@ -115,8 +123,10 @@
     // ---- Config partagee ----
     $("base").value = localStorage.getItem("base") || "https://ou-suis-je.onrender.com";
     $("key").value = localStorage.getItem("key") || "";
+    $("hname").value = localStorage.getItem("hname") || "";
     $("base").oninput = () => localStorage.setItem("base", $("base").value.trim());
     $("key").oninput = () => localStorage.setItem("key", $("key").value.trim());
+    $("hname").oninput = () => localStorage.setItem("hname", $("hname").value.trim());
     const url = (p) => $("base").value.trim() + p + "?key=" + encodeURIComponent($("key").value.trim());
 
     async function post(p, body) {
@@ -148,7 +158,18 @@
 
     /* =================== RANDONNEUR =================== */
     let watcherId = null, active = false, lastPt = null, distM = 0, lastSendTs = 0;
-    const MIN_SEND_MS = 30000;
+    const MIN_SEND_MS = 30000, MAX_QUEUE = 5000;
+    let queue = [];
+    try { queue = JSON.parse(localStorage.getItem("queue") || "[]"); } catch (e) { queue = []; }
+    const saveQueue = () => { try { localStorage.setItem("queue", JSON.stringify(queue)); } catch (e) {} };
+    function enqueue(p) { queue.push(p); if (queue.length > MAX_QUEUE) queue.shift(); saveQueue(); }
+    async function flush() {
+      if (!queue.length) return;
+      const batch = queue.slice();
+      const ok = await post("/batch", { points: batch });
+      if (ok) { queue = queue.slice(batch.length); saveQueue(); log("Envoyé " + new Date().toLocaleTimeString() + (queue.length ? " (" + queue.length + " en attente)" : "")); }
+      else { log("Hors-ligne — " + queue.length + " point(s) en attente"); }
+    }
 
     async function battery() {
       try { const i = await Device.getBatteryInfo(); return i.batteryLevel != null ? Math.round(i.batteryLevel * 100) : null; }
@@ -167,13 +188,15 @@
       lastSendTs = now;
       const bat = await battery();
       $("h_bat").textContent = bat != null ? bat + " %" : "—";
-      const ok = await post("/update", { lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy, alt: loc.altitude, spd: spdKmh, bat });
-      if (ok) log("Envoyé " + new Date().toLocaleTimeString());
+      // Bufferise puis tente d'envoyer (flush vide la file au retour reseau).
+      enqueue({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy, alt: loc.altitude, spd: spdKmh, bat, ts: now });
+      flush();
     }
     async function hikerStart() {
       if (!BG || !BG.addWatcher) { log("⚠️ Plugin GPS introuvable"); return; }
-      await post("/start", { label: "Rando " + new Date().toLocaleDateString() });
+      await post("/start", { label: "Rando " + new Date().toLocaleDateString(), name: $("hname").value.trim() || null });
       lastPt = null; distM = 0; lastSendTs = 0;
+      queue = []; saveQueue();
       watcherId = await BG.addWatcher(
         { backgroundMessage: "Suivi rando actif — position partagée", backgroundTitle: "RandoTracker", requestPermissions: true, stale: false, distanceFilter: 10 },
         (location, error) => {
@@ -203,6 +226,25 @@
     /* =================== RECEVEUR =================== */
     const SIGNAL_LOST_MS = 5 * 60 * 1000, IDLE_MS = 15 * 60 * 1000, IDLE_RADIUS_M = 60;
     let map = null, line = null, marker = null, accCircle = null, startMark = null, fitted = false, beeped = false, recTimer = null;
+    let tileLayer = null, mapDark = localStorage.getItem("maptheme") === "dark";
+    const TILES = {
+      light: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", opt: { attribution: "© OpenStreetMap", maxZoom: 19 } },
+      dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", opt: { attribution: "© OpenStreetMap © CARTO", maxZoom: 19 } },
+    };
+    function applyTiles() {
+      if (!map) return;
+      if (tileLayer) tileLayer.remove();
+      const t = mapDark ? TILES.dark : TILES.light;
+      tileLayer = L.tileLayer(t.url, t.opt).addTo(map);
+      $("themeToggle").textContent = mapDark ? "☀️ Clair" : "🌙 Sombre";
+    }
+    function recenter() {
+      if (!map) return;
+      if (line && line.getLatLngs().length > 1) { map.fitBounds(line.getBounds().pad(0.2)); }
+      else if (marker) { map.setView(marker.getLatLng(), 15); }
+    }
+    $("recenter").onclick = recenter;
+    $("themeToggle").onclick = () => { mapDark = !mapDark; localStorage.setItem("maptheme", mapDark ? "dark" : "light"); applyTiles(); };
 
     function beep() {
       try {
@@ -221,7 +263,7 @@
     function ensureMap() {
       if (map) { setTimeout(() => map.invalidateSize(), 100); return; }
       map = L.map("map").setView([46.6, 2.4], 5);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19 }).addTo(map);
+      applyTiles();
       setTimeout(() => map.invalidateSize(), 200);
     }
     function startReceiver() {
@@ -268,7 +310,8 @@
       $("r_bat").textContent = last.bat != null ? last.bat + " %" : "—";
       $("r_acc").textContent = last.acc != null ? "±" + Math.round(last.acc) + " m" : "—";
       $("r_age").textContent = "il y a " + fmtAge(ageMs);
-      $("bar").textContent = (d.label || "Rando") + (d.active ? " — en cours" : " — arrêtée");
+      const who = d.name || d.label || "Rando";
+      $("bar").textContent = who + (d.active ? " — en cours" : " — arrêtée");
 
       if (d.arrived) { setAlert("ok", "🏁 Arrivé !"); return; }
       if (ageMs > SIGNAL_LOST_MS) { setAlert("danger", "⚠️ Aucun signal depuis " + fmtAge(ageMs)); return; }

@@ -15,7 +15,7 @@ const MAX_POINTS = 5000; // securite memoire
 // Etat d'une sortie, en memoire (perdu au redemarrage = OK, "live only").
 let hike = newHike();
 function newHike() {
-  return { active: false, startTs: null, arrived: false, label: null, points: [] };
+  return { active: false, startTs: null, arrived: false, label: null, name: null, points: [] };
   // point = { lat, lng, acc, alt, spd, bat, ts }
 }
 
@@ -35,6 +35,7 @@ app.post("/start", (req, res) => {
   hike.active = true;
   hike.startTs = Date.now();
   hike.label = (req.body && req.body.label) || null;
+  hike.name = (req.body && req.body.name) || null;
   res.json({ ok: true });
 });
 
@@ -77,6 +78,34 @@ app.post("/update", (req, res) => {
   res.json({ ok: true });
 });
 
+// Envoi groupe (points bufferises hors-reseau). Conserve le ts d'origine.
+app.post("/batch", (req, res) => {
+  if (!checkKey(req, res)) return;
+  const arr = (req.body && req.body.points) || [];
+  if (!Array.isArray(arr)) return res.status(400).json({ error: "points doit etre un tableau" });
+  if (!hike.active && hike.points.length === 0) {
+    hike.active = true;
+    hike.startTs = Date.now();
+  }
+  let added = 0;
+  for (const b of arr) {
+    if (typeof b.lat !== "number" || typeof b.lng !== "number") continue;
+    hike.points.push({
+      lat: b.lat,
+      lng: b.lng,
+      acc: num(b.acc),
+      alt: num(b.alt),
+      spd: num(b.spd),
+      bat: num(b.bat),
+      ts: typeof b.ts === "number" ? b.ts : Date.now(),
+    });
+    added++;
+  }
+  hike.points.sort((a, b) => a.ts - b.ts);
+  while (hike.points.length > MAX_POINTS) hike.points.shift();
+  res.json({ ok: true, added });
+});
+
 // L'observateur lit toute la trace + meta.
 app.get("/track", (req, res) => {
   if (!checkKey(req, res)) return;
@@ -85,6 +114,7 @@ app.get("/track", (req, res) => {
     arrived: hike.arrived,
     startTs: hike.startTs,
     label: hike.label,
+    name: hike.name,
     points: hike.points,
   });
 });

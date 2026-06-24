@@ -20,6 +20,9 @@ La carte des observateurs s'ouvre dans un simple navigateur, rien à installer p
   - 🟡 **Immobile** : pas bougé (< 60 m) depuis 15 min
   - 🟢 **Arrivé** : bouton « Je suis arrivé »
 - 🔋 **Économe** : l'app n'envoie qu'au plus **toutes les 30 s** (moins de batterie/données).
+- 📥 **Buffer hors-ligne** : si pas de réseau, les points GPS sont mis en file (localStorage, plafond 5000) et renvoyés en lot (`/batch`) au retour du réseau.
+- 🙍 **Nom du randonneur** affiché côté receveur.
+- 🗺️ **Carte sombre/clair** + bouton **recentrer** (mode receveur).
 - 🔒 Protégé par une **clé secrète** partagée (`SHARE_SECRET`).
 
 > Position stockée **en mémoire** du serveur (« live only ») : effacée au redémarrage, pas de base de données.
@@ -117,7 +120,7 @@ Pour la fiabilité : désactiver l'**optimisation batterie** pour l'app (sinon A
 
 ## Limites
 
-- **Sans réseau, rien n'est envoyé** : le GPS capte ta position hors réseau, mais l'envoi au serveur nécessite internet. (Un buffer hors-ligne pourrait être ajouté.)
+- **Sans réseau** : le GPS capte hors réseau ; les points sont bufferisés et renvoyés au retour du réseau. Tant qu'aucun réseau ne revient, le receveur ne voit pas les nouveaux points (pas de transmission satellite).
 - L'APK est en **signature debug** : OK pour usage perso (sideload), pas pour le Play Store.
 - Trace non persistante : perdue au redémarrage du serveur.
 - Batterie lisible sur Chrome Android, **pas sur iPhone/Safari**.
